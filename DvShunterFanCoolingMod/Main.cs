@@ -9,28 +9,64 @@ namespace DvShunterFanCoolingMod
 {
     public class Main
     {
+        public const float FAN_COOL = 6f;
+        public const float FUEL_CONSUMPTION = 5f;
+        public const float POWER_LOSS = 0.2f;
+
+        public static bool isFanOn = false;
+
         static bool Load(UnityModManager.ModEntry modEntry)
         {
             var harmony = HarmonyInstance.Create(modEntry.Info.Id);
+
             harmony.PatchAll(Assembly.GetExecutingAssembly());
-            // Something
-            return true; // If false the mod will show an error.
+
+            return true;
         }
     }
 
-    // fix temperature
+    // decrease temperature
     [HarmonyPatch(typeof(ShunterLocoSimulation), "SimulateEngineTemp")]
     class ShunterLocoSimulation_SimulateEngineTemp_Patch
     {
-        public static bool fan = false;
-
         static void Postfix(ShunterLocoSimulation __instance, float delta)
         {
-            if (fan)
-            {
-                __instance.engineTemp.AddNextValue(-10f * delta);
-            }
+            if (!__instance.engineOn || __instance.engineTemp.value <= 45f)
+                return;
 
+            if (Main.isFanOn)
+            {
+                __instance.engineTemp.AddNextValue(-Main.FAN_COOL * delta);
+            }
+        }
+    }
+
+    // increase fuel consumption
+    [HarmonyPatch(typeof(ShunterLocoSimulation), "SimulateFuel")]
+    class ShunterLocoSimulation_SimulateFuel_Patch
+    {
+        static void Postfix(ShunterLocoSimulation __instance, float delta)
+        {
+            if (!__instance.engineOn || __instance.fuel.value <= 0.0f)
+                return;
+
+            if (Main.isFanOn)
+            {
+                __instance.fuel.AddNextValue(Mathf.Lerp(0.025f, 1f, __instance.engineRPM.value) * -Main.FUEL_CONSUMPTION * delta);
+            }
+        }
+    }
+
+    // decrease power
+    [HarmonyPatch(typeof(LocoControllerBase), "GetTotalAppliedForcePerBogie")]
+    class LocoControllerBase_GetTotalAppliedForcePerBogie_Patch
+    {
+        static void Postfix(ShunterLocoSimulation __instance, ref float __result)
+        {
+            if (Main.isFanOn)
+            {
+                __result *= 1f - Main.POWER_LOSS;
+            }
         }
     }
 
@@ -55,7 +91,7 @@ namespace DvShunterFanCoolingMod
             
             fanCtrl.ValueChanged += (e =>
             {
-                ShunterLocoSimulation_SimulateEngineTemp_Patch.fan = true ? e.newValue == 1 : false;
+                Main.isFanOn = e.newValue >= 0.5f;
             });
         }
     }
